@@ -21,6 +21,7 @@ BASE_ARGS = {
     'activation': 'gelu',
     'embeddings_scale': True,
     'gradient_clip': 0.1,
+    'num_epochs': 10,
     # Train args
     'learningrate': 7e-3,
     'batchsize': 16,
@@ -32,9 +33,11 @@ TEXT_ARGS = {'task': 'integration_tests:nocandidate', 'num_epochs': 4}
 
 IMAGE_ARGS = {
     'task': 'integration_tests:ImageTeacher',
-    'num_epochs': 200,
+    'num_epochs': 20,
     'image_mode': 'resnet152',
 }
+
+EARLY_FUSION_ARGS = {'image_fusion_type': 'early', 'n_segments': 2}
 
 MULTITASK_ARGS = {
     'task': ','.join([m['task'] for m in [IMAGE_ARGS, TEXT_ARGS]]),  # type: ignore
@@ -70,7 +73,7 @@ class TestImageSeq2Seq(unittest.TestCase):
         args.update(TEXT_ARGS)
         valid, test = testing_utils.train_model(args)
         self.assertLessEqual(
-            valid['ppl'], 1.5, f'failed to train image_seq2seq on text task'
+            valid['ppl'], 1.5, 'failed to train image_seq2seq on text task'
         )
 
     @testing_utils.retry(ntries=3)
@@ -87,7 +90,7 @@ class TestImageSeq2Seq(unittest.TestCase):
 
         valid, test = testing_utils.train_model(args)
         self.assertLessEqual(
-            valid['ppl'], 6.6, f'failed to train image_seq2seq on image task'
+            valid['ppl'], 8.6, 'failed to train image_seq2seq on image task'
         )
 
     @testing_utils.retry(ntries=3)
@@ -102,7 +105,41 @@ class TestImageSeq2Seq(unittest.TestCase):
 
         valid, test = testing_utils.train_model(args)
         self.assertLessEqual(
-            valid['ppl'], 5.0, f'failed to train image_seq2seq on image+text task',
+            valid['ppl'], 5.0, 'failed to train image_seq2seq on image+text task'
+        )
+
+    @testing_utils.retry(ntries=3)
+    @testing_utils.skipUnlessGPU
+    def test_image_task_early_fusion(self):
+        """
+        Test that model correctly handles image task.
+
+        Early Fusion
+        """
+        args = BASE_ARGS.copy()
+        args.update(IMAGE_ARGS)
+        args.update(EARLY_FUSION_ARGS)
+
+        valid, test = testing_utils.train_model(args)
+        self.assertLessEqual(
+            valid['ppl'], 8.6, 'failed to train image_seq2seq on image task'
+        )
+
+    @testing_utils.retry(ntries=3)
+    @testing_utils.skipUnlessGPU
+    def test_multitask_early_fusion(self):
+        """
+        Test that model can handle multiple inputs.
+
+        Early Fusion
+        """
+        args = BASE_ARGS.copy()
+        args.update(MULTITASK_ARGS)
+        args.update(EARLY_FUSION_ARGS)
+
+        valid, test = testing_utils.train_model(args)
+        self.assertLessEqual(
+            valid['ppl'], 5.0, 'failed to train image_seq2seq on image+text task'
         )
 
 
