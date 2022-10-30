@@ -166,15 +166,6 @@ class ClassifierAgent(ClassificationMixin, TransformerGeneratorAgent):
             )
         return preds
 
-    def get_labels_field(self, observations):
-        if 'labels' in observations[0]:
-            labels_field = 'labels'
-        elif 'eval_labels' in observations[0]:
-            labels_field = 'eval_labels'
-        else:
-            labels_field = None
-        return labels_field
-
     def train_step(self, batch):
         """
         Train on a single batch of examples.
@@ -196,9 +187,7 @@ class ClassifierAgent(ClassificationMixin, TransformerGeneratorAgent):
         # Get predictions
         _, prediction_id = torch.max(scores.float().cpu(), 1)
         preds = [self.class_list[idx] for idx in prediction_id]
-        labels_field = self.get_labels_field(batch['observations'])
-        labels_lst = self._get_labels(batch['observations'], labels_field)
-        self._update_confusion_matrix(preds, labels_lst)
+        self._update_confusion_matrix(preds, batch.labels)
 
         return Output(preds)
 
@@ -225,14 +214,22 @@ class ClassifierAgent(ClassificationMixin, TransformerGeneratorAgent):
             self.record_local_metric('loss', AverageMetric.many(loss))
 
             preds = [self.class_list[idx] for idx in prediction_id]
-            labels_field = self.get_labels_field(batch['observations'])
+            labels = batch.labels
 
-            if preds is not None and labels_field is not None:
-                labels_lst = self._get_labels(batch['observations'], labels_field)
-                self._update_confusion_matrix(preds, labels_lst)
+            if preds is not None and labels is not None:
+                self._update_confusion_matrix(preds, labels)
 
         if self.opt.get('print_scores', False):
-            return Output(preds, probs=probs.cpu())
+            assert probs.size(1) == len(self.class_list)
+            cpu_probs = probs.cpu()
+            probs_by_class = [
+                {
+                    class_: prob
+                    for class_, prob in zip(self.class_list, prob_row.tolist())
+                }
+                for prob_row in cpu_probs
+            ]
+            return Output(preds, probs=cpu_probs, probs_by_class=probs_by_class)
         else:
             return Output(preds)
 

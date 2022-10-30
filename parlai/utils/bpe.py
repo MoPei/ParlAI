@@ -35,6 +35,12 @@ except ImportError:
     SUBWORD_BPE_INSTALLED = False
 
 
+try:
+    import regex
+except ImportError:
+    regex = None
+
+
 def bpe_factory(opt: Opt, shared: TShared) -> 'BPEHelper':
     """
     BPE Helper Factory.
@@ -216,7 +222,7 @@ class BPEHelper(ABC):
                 left = self.helper_decode(tokens[:i], token_ids[:i], delimiter)
                 # token itself is easy to map to a string
                 center = token
-                # to the right, there may stil be special tokens
+                # to the right, there may still be special tokens
                 right = self.decode(
                     tokens[min(len(token_ids), i + 1) :],
                     token_ids[min(len(token_ids), i + 1) :],
@@ -491,12 +497,12 @@ class Gpt2BpeHelper(BPEHelper):
     BPE Helper for GPT2 Models.
 
     Original source:
-        https://github.com/openai/gpt-2/blob/master/src/encoder.py
+        https://github.com/openai/gpt-2/blob/main/src/encoder.py
 
     Original license: MIT
 
     This is a modified implementation from that of fairseq:
-        https://github.com/pytorch/fairseq/blob/master/fairseq/data/encoders/gpt2_bpe_utils.py
+        https://github.com/pytorch/fairseq/blob/main/fairseq/data/encoders/gpt2_bpe_utils.py
 
     Fairseq license: MIT
     """
@@ -506,6 +512,7 @@ class Gpt2BpeHelper(BPEHelper):
     )
     DEFAULT_VOCAB_BPE = 'https://dl.fbaipublicfiles.com/fairseq/gpt2_bpe/vocab.bpe'
     ERRORS_METHOD = 'replace'
+    PATTERN = r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
     def __init__(self, opt: Opt, shared: TShared = None):
         """
@@ -534,17 +541,10 @@ class Gpt2BpeHelper(BPEHelper):
         self.byte_decoder = {v: k for k, v in self.byte_encoder.items()}
         self.bpe_ranks = dict(zip(bpe_merges, range(len(bpe_merges))))
 
-        try:
-            import regex as re
-
-            self.re = re
-        except ImportError:
+        if regex is None:
             raise ImportError('Please install regex with: pip install regex')
-
         # Should haved added re.IGNORECASE so BPE merges can happen for capitalized versions of contractions
-        self.pat = self.re.compile(
-            r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-        )
+        self.pat = regex.compile(self.PATTERN)
 
     def _build_data(self) -> Tuple[str, str]:
         """
@@ -597,9 +597,9 @@ class Gpt2BpeHelper(BPEHelper):
         The reversible bpe codes work on unicode strings. This means you need a large #
         of unicode characters in your vocab if you want to avoid UNKs. When you're at
         something like a 10B token dataset you end up needing around 5K for decent
-        coverage. This is a signficant percentage of your normal, say, 32K bpe vocab. To
-        avoid that, we want lookup tables between utf-8 bytes and unicode strings. And
-        avoids mapping to whitespace/control characters the bpe code barfs on.
+        coverage. This is a significant percentage of your normal, say, 32K bpe vocab.
+        To avoid that, we want lookup tables between utf-8 bytes and unicode strings.
+        And avoids mapping to whitespace/control characters the bpe code barfs on.
         """
         bs: List[int] = (
             list(range(ord("!"), ord("~") + 1))
@@ -608,10 +608,10 @@ class Gpt2BpeHelper(BPEHelper):
         )
         cs: List[int] = bs[:]
         n = 0
-        for b in range(2 ** 8):
+        for b in range(2**8):
             if b not in bs:
                 bs.append(b)
-                cs.append(2 ** 8 + n)
+                cs.append(2**8 + n)
                 n += 1
         str_cs: List[str] = [chr(n) for n in cs]
         return dict(zip(bs, str_cs))
@@ -712,7 +712,7 @@ class Gpt2BpeHelper(BPEHelper):
             A list of tokens
         """
         bpe_tokens: List[str] = []
-        for token in self.re.findall(self.pat, text):
+        for token in regex.findall(self.pat, text):
             token = ''.join(self.byte_encoder[b] for b in token.encode('utf-8'))
             bpe_tokens.extend(
                 self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' ')

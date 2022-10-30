@@ -55,12 +55,11 @@ except ImportError:
     BPE_INSTALLED = False
 
 try:
-    import maskrcnn_benchmark  # noqa: F401
-    import cv2  # noqa: F401
+    import fairseq  # noqa: F401
 
-    DETECTRON_AVAILABLE = True
+    FAIRSEQ_AVAILABLE = True
 except ImportError:
-    DETECTRON_AVAILABLE = False
+    FAIRSEQ_AVAILABLE = False
 
 
 def is_this_circleci():
@@ -75,6 +74,16 @@ def skipUnlessTorch(testfn, reason='pytorch is not installed'):
     Decorate a test to skip if torch is not installed.
     """
     return unittest.skipUnless(TORCH_AVAILABLE, reason)(testfn)
+
+
+def skipUnlessTorch17(testfn, reason='Test requires pytorch 1.7+'):
+    if not TORCH_AVAILABLE:
+        skip = True
+    else:
+        from packaging import version
+
+        skip = version.parse(torch.__version__) < version.parse('1.7.0')
+    return unittest.skipIf(skip, reason)(testfn)
 
 
 def skipIfGPU(testfn, reason='Test is CPU-only'):
@@ -114,13 +123,11 @@ def skipUnlessVision(testfn, reason='torchvision not installed'):
     return unittest.skipUnless(VISION_AVAILABLE, reason)(testfn)
 
 
-def skipUnlessDetectron(
-    testfn, reason='maskrcnn_benchmark and/or opencv not installed'
-):
+def skipUnlessFairseq(testfn, reason='fairseq not installed'):
     """
-    Decorate a test to skip unless maskrcnn_benchmark and opencv are installed.
+    Decorate a test to skip unless fairseq is installed.
     """
-    return unittest.skipUnless(DETECTRON_AVAILABLE, reason)(testfn)
+    return unittest.skipUnless(FAIRSEQ_AVAILABLE, reason)(testfn)
 
 
 class retry(object):
@@ -190,9 +197,9 @@ def git_changed_files(skip_nonexisting=True):
 
     :param bool skip_nonexisting:
         If true, ignore files that don't exist on disk. This is useful for
-        disregarding files created in master, but don't exist in HEAD.
+        disregarding files created in main, but don't exist in HEAD.
     """
-    fork_point = git_.merge_base('origin/master', 'HEAD').strip()
+    fork_point = git_.merge_base('origin/main', 'HEAD').strip()
     filenames = git_.diff('--name-only', fork_point).split('\n')
     if skip_nonexisting:
         filenames = [fn for fn in filenames if PathManager.exists(fn)]
@@ -201,9 +208,9 @@ def git_changed_files(skip_nonexisting=True):
 
 def git_commit_messages():
     """
-    Output each commit message between here and master.
+    Output each commit message between here and main.
     """
-    fork_point = git_.merge_base('origin/master', 'HEAD').strip()
+    fork_point = git_.merge_base('origin/main', 'HEAD').strip()
     messages = git_.log(fork_point + '..HEAD')
     return messages
 

@@ -28,6 +28,7 @@ class YelpTeacher(FixedDialogTeacher):
     def add_cmdline_args(
         cls, parser: ParlaiParser, partial_opt: Optional[Opt] = None
     ) -> ParlaiParser:
+        super().add_cmdline_args(parser, partial_opt)
         parser = gend_utils.add_common_args(parser)
         return parser
 
@@ -76,7 +77,7 @@ class YelpTeacher(FixedDialogTeacher):
             raise RuntimeError(
                 f'\n\n{stars}\nThis data must be downloaded following instructions in '
                 'the README here:'
-                '<https://github.com/facebookresearch/MultipleAttributeTextRewriting/blob/master/data/README.md>. '
+                '<https://github.com/facebookresearch/MultipleAttributeTextRewriting/blob/main/data/README.md>. '
                 '\nIt cannot be automatically downloaded, as one must agree to '
                 'the terms outlined on the website before gaining access to the data.\n\n'
                 'Once downloaded, please put the data in the following '
@@ -188,9 +189,7 @@ class YelpTeacher(FixedDialogTeacher):
         extra_data = []
         if self.add_unknown_classes:
             # load about data (unknown but inferred)
-            extra_data = gend_utils.get_inferred_about_data(
-                self.opt['task'], self.opt['datatype']
-            )
+            extra_data = gend_utils.get_inferred_about_data(self.opt['task'], self.opt)
 
             # now create partner/TO data: true neutral
             for ex in data:

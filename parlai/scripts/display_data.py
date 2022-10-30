@@ -18,7 +18,7 @@ parlai display_data --task babi:task1k:1
 """
 
 from parlai.core.params import ParlaiParser
-from parlai.agents.repeat_label.repeat_label import RepeatLabelAgent
+from parlai.agents.fixed_response.fixed_response import FixedResponseAgent
 from parlai.core.worlds import create_task
 from parlai.utils.strings import colorize
 from parlai.core.script import ParlaiScript, register_script
@@ -51,9 +51,13 @@ def simple_display(opt, world, turn):
     act = world.get_acts()[0]
     if turn == 0:
         text = "- - - NEW EPISODE: " + act.get('id', "[no agent id]") + " - - -"
-        print(colorize(text, 'highlight'))
+        print(
+            colorize(
+                text.encode('utf-16', 'surrogatepass').decode('utf-16'), 'highlight'
+            )
+        )
     text = act.get('text', '[no text field]')
-    print(colorize(text, 'text'))
+    print(colorize(text.encode('utf-16', 'surrogatepass').decode('utf-16'), 'text'))
     labels = act.get('labels', act.get('eval_labels', ['[no labels field]']))
     labels = '|'.join(labels)
     print('   ' + colorize(labels, 'labels'))
@@ -64,9 +68,10 @@ def display_data(opt):
     if 'ordered' not in opt['datatype'] and 'train' in opt['datatype']:
         opt['datatype'] = f"{opt['datatype']}:ordered"
 
-    # create repeat label agent and assign it to the specified task
+    # create dummy agent and assign it to the specified task
     opt.log()
-    agent = RepeatLabelAgent(opt)
+    opt['fixed_response'] = None
+    agent = FixedResponseAgent(opt)
     world = create_task(opt, agent)
 
     # Show some example dialogs.

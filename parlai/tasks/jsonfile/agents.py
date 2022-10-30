@@ -27,6 +27,7 @@ class JsonTeacher(ConversationTeacher):
     def add_cmdline_args(
         cls, parser: ParlaiParser, partial_opt: Optional[Opt] = None
     ) -> ParlaiParser:
+        super().add_cmdline_args(parser, partial_opt)
         agent = parser.add_argument_group('JsonFile Task Arguments')
         agent.add_argument('-jfdp', '--jsonfile-datapath', type=str, help="Data file")
         agent.add_argument(
@@ -46,19 +47,18 @@ class JsonTeacher(ConversationTeacher):
         return parser
 
     def __init__(self, opt, shared=None):
-        super().__init__(opt, shared)
         opt = copy.deepcopy(opt)
         if not opt.get('jsonfile_datapath'):
             raise RuntimeError('jsonfile_datapath not specified')
         datafile = opt['jsonfile_datapath']
-        if self.opt['jsonfile_datatype_extension']:
-            datafile += "_" + self.opt['datatype'].split(':')[0] + '.jsonl'
-        if shared is None:
-            self._setup_data(datafile)
+        if opt['jsonfile_datatype_extension']:
+            datafile += "_" + opt['datatype'].split(':')[0] + '.jsonl'
+        opt['conversationteacher_datafile'] = datafile
+        super().__init__(opt, shared)
+
         # Truncate datafile to just the immediate enclosing folder name and file name
         dirname, basename = os.path.split(datafile)
         self.id = os.path.join(os.path.split(dirname)[1], basename)
-        self.reset()
 
 
 class DefaultTeacher(JsonTeacher):

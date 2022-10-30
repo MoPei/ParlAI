@@ -9,11 +9,20 @@ Test many variants of transformers.
 """
 
 import os
+import torch
 import unittest
+from unittest.mock import MagicMock
 import pytest
 import parlai.utils.testing as testing_utils
+from parlai.agents.transformer.modules import (
+    TransformerFFN,
+    TransformerGeneratorModel,
+    TransformerEncoder,
+    TransformerEncoderLayer,
+)
 from parlai.core.agents import create_agent
 from parlai.core.agents import create_agent_from_model_file
+from parlai.core.dict import DictionaryAgent
 from parlai.core.opt import Opt
 from .test_dict import DEFAULT_BYTELEVEL_BPE_VOCAB, DEFAULT_BYTELEVEL_BPE_MERGE
 from parlai.core.params import ParlaiParser
@@ -122,7 +131,7 @@ class TestTransformerRanker(unittest.TestCase):
                     n_heads=1,
                     ffn_size=4,
                     embedding_size=4,
-                    warmup_updates=1,
+                    warmup_updates=0,
                     lr_scheduler='invsqrt',
                 )
             )
@@ -167,7 +176,7 @@ class TestTransformerRanker(unittest.TestCase):
                     n_heads=1,
                     ffn_size=32,
                     embedding_size=32,
-                    warmup_updates=1,
+                    warmup_updates=0,
                     lr_scheduler='reduceonplateau',
                 )
             )
@@ -244,8 +253,8 @@ class TestTransformerRanker(unittest.TestCase):
             reduction_type='first',  # this is really what we're trying to test for
         )
 
-        self.assertGreaterEqual(valid['hits@1'], 0.90)
-        self.assertGreaterEqual(test['hits@1'], 0.90)
+        self.assertGreaterEqual(valid['hits@1'], 0.99)
+        self.assertGreaterEqual(test['hits@1'], 0.99)
 
 
 class TestTransformerGenerator(TestTransformerBase):
@@ -274,6 +283,23 @@ class TestTransformerGenerator(TestTransformerBase):
         )
         args.update(args)
         return testing_utils.train_model(args)
+
+    def test_checkpoint(self):
+        """
+        Checks --checkpoint-activations true.
+        """
+        valid, test = testing_utils.train_model(
+            dict(
+                task='integration_tests:overfit',
+                model='transformer/generator',
+                dict_file='zoo:unittest/transformer_generator2/model.dict',
+                batchsize=4,
+                skip_generation=True,
+                validation_metric='ppl',
+                max_train_steps=10,
+                checkpoint_activations=True,
+            )
+        )
 
     def test_greedysearch(self):
         """
@@ -353,7 +379,7 @@ class TestTransformerGenerator(TestTransformerBase):
         self.assertEqual(len(response["beam_texts"]), size)
 
     @pytest.mark.nofbcode
-    def test_beamsearch_blocking(self):
+    def test_beamsearch_blocking_cpu(self):
         """
         Test beamsearch blocking.
         """
@@ -396,7 +422,59 @@ class TestTransformerGenerator(TestTransformerBase):
             assert '34 34' not in text
 
     @pytest.mark.nofbcode
-    def test_beamsearch_contextblocking(self):
+    @testing_utils.skipUnlessGPU
+    def test_beamsearch_blocking_gpu(self):
+        """
+        Test beamsearch blocking.
+        """
+        with testing_utils.tempdir() as tmpdir:
+            agent = create_agent_from_model_file(
+                'zoo:unittest/beam_blocking/model',
+                Opt(gpu_beam_blocking=True),
+            )
+            agent.observe({'text': '5 5 5 5 5 5 5', 'episode_done': True})
+            assert agent.act()['text'] == '5 5 5 5 5 5 5'
+
+            agent = create_agent_from_model_file(
+                'zoo:unittest/beam_blocking/model',
+                Opt(beam_block_ngram=1, gpu_beam_blocking=True),
+            )
+            agent.observe({'text': '5 5 5 5 5 5 5', 'episode_done': True})
+            assert '5 5' not in agent.act()['text']
+
+            agent = create_agent_from_model_file(
+                'zoo:unittest/beam_blocking/model',
+                Opt(beam_block_ngram=2, gpu_beam_blocking=True),
+            )
+            agent.observe({'text': '5 5 5 5 5 5 5', 'episode_done': True})
+            assert '5 5 5' not in agent.act()['text']
+
+            with open(os.path.join(tmpdir, 'blocklist.txt'), 'w') as f:
+                f.write("38\n62\n34 34\n")
+
+            agent = create_agent_from_model_file(
+                'zoo:unittest/beam_blocking/model',
+                Opt(
+                    beam_block_list_filename=os.path.join(tmpdir, 'blocklist.txt'),
+                    gpu_beam_blocking=True,
+                ),
+            )
+            agent.observe({'text': '4 4 4', 'episode_done': True})
+            assert agent.act()['text'] == '4 4 4'
+
+            agent.observe({'text': '38 38 38', 'episode_done': True})
+            assert '38' not in agent.act()['text']
+
+            agent.observe({'text': '62 62 62', 'episode_done': True})
+            assert '62' not in agent.act()['text']
+
+            agent.observe({'text': '34 34 34', 'episode_done': True})
+            text = agent.act()['text']
+            assert '34' in text
+            assert '34 34' not in text
+
+    @pytest.mark.nofbcode
+    def test_beamsearch_contextblocking_cpu(self):
         """
         Test beamsearch context blocking.
         """
@@ -417,6 +495,42 @@ class TestTransformerGenerator(TestTransformerBase):
 
         agent = create_agent_from_model_file(
             'zoo:unittest/context_blocking/model', Opt(beam_context_block_ngram=2)
+        )
+        agent.observe({'text': '5 4 3 2', 'episode_done': True})
+        text = agent.act()['text']
+        assert '5' in text
+        assert '5 4' not in text
+        assert '4 3' not in text
+        assert '3 2' not in text
+
+    @pytest.mark.nofbcode
+    @testing_utils.skipUnlessGPU
+    def test_beamsearch_contextblocking_gpu(self):
+        """
+        Test beamsearch context blocking.
+        """
+
+        agent = create_agent_from_model_file(
+            'zoo:unittest/context_blocking/model',
+            Opt(gpu_beam_blocking=True),
+        )
+        agent.observe({'text': '5 4 3 2', 'episode_done': True})
+        assert agent.act()['text'] == '5 4 3 2'
+
+        agent = create_agent_from_model_file(
+            'zoo:unittest/context_blocking/model',
+            Opt(beam_context_block_ngram=1, gpu_beam_blocking=True),
+        )
+        agent.observe({'text': '5 4 3 2', 'episode_done': True})
+        text = agent.act()['text']
+        assert '5' not in text
+        assert '4' not in text
+        assert '3' not in text
+        assert '2' not in text
+
+        agent = create_agent_from_model_file(
+            'zoo:unittest/context_blocking/model',
+            Opt(beam_context_block_ngram=2, gpu_beam_blocking=True),
         )
         agent.observe({'text': '5 4 3 2', 'episode_done': True})
         text = agent.act()['text']
@@ -508,8 +622,8 @@ class TestTransformerGenerator(TestTransformerBase):
             adam_eps=1e-6,  # just to test another flag simultaneously
         )
 
-        self.assertLessEqual(valid['ppl'], 1.30)
-        self.assertLessEqual(test['ppl'], 1.30)
+        self.assertLessEqual(valid['ppl'], 1.02)
+        self.assertLessEqual(test['ppl'], 1.02)
 
     @testing_utils.retry(ntries=3)
     def test_prelayernorm(self):
@@ -544,13 +658,6 @@ class TestTransformerGenerator(TestTransformerBase):
             assert valid['fairseq_bleu1'] > 0.9
         except ImportError:
             # fairseq not installed, let's just move on
-            pass
-        try:
-            import nltk  # noqa: F401
-
-            assert valid['nltk_bleu1'] > 0.9
-        except ImportError:
-            # nltk not installed, let's just move on
             pass
 
     def test_asymmetry(self):
@@ -722,7 +829,7 @@ class TestLearningRateScheduler(unittest.TestCase):
         Test generators resume correctly.
         """
         GENERATOR_ARGS = dict(
-            model='transformer/generator', skip_generation=True, warmup_updates=1
+            model='transformer/generator', skip_generation=True, warmup_updates=0
         )
         self._test_learning_rate_resuming(GENERATOR_ARGS)
 
@@ -730,7 +837,7 @@ class TestLearningRateScheduler(unittest.TestCase):
         """
         Test resuming learning rate for the ranker.
         """
-        RANKER_ARGS = dict(model='transformer/ranker', warmup_updates=1)
+        RANKER_ARGS = dict(model='transformer/ranker', warmup_updates=0)
         self._test_learning_rate_resuming(RANKER_ARGS)
 
     def test_invsqrt_learning_rate(self):
@@ -739,7 +846,7 @@ class TestLearningRateScheduler(unittest.TestCase):
             model='transformer/generator',
             learningrate=1,
             batchsize=1,
-            warmup_updates=1,
+            warmup_updates=0,
             lr_scheduler='invsqrt',
             n_layers=1,
             n_heads=1,
@@ -750,11 +857,9 @@ class TestLearningRateScheduler(unittest.TestCase):
             short_final_eval=True,
         )
 
-        args['num_epochs'] = 9 / 500
-        args['validation_every_n_epochs'] = 9 / 500
+        args['num_epochs'] = args['validation_every_n_epochs'] = 9 / 500
         valid1, test1 = testing_utils.train_model(args)
-        args['num_epochs'] = 16 / 500
-        args['validation_every_n_epochs'] = 16 / 500
+        args['num_epochs'] = args['validation_every_n_epochs'] = 16 / 500
         valid2, test2 = testing_utils.train_model(args)
 
         self.assertAlmostEqual(
@@ -779,6 +884,28 @@ class TestPolyencoder(TestTransformerBase):
     @pytest.mark.nofbcode
     def test_resize_embeddings(self):
         self._test_resize_embeddings('transformer/polyencoder')
+
+    def test_multi_head_attention(self):
+        with testing_utils.tempdir() as tmpdir:
+            model_file = os.path.join(tmpdir, 'model_file')
+            _, _ = testing_utils.train_model(
+                Opt(
+                    model='transformer/polyencoder',
+                    task='integration_tests:short_fixed',
+                    n_layers=1,
+                    n_encoder_layers=2,
+                    n_decoder_layers=4,
+                    num_epochs=1,
+                    dict_tokenizer='bytelevelbpe',
+                    bpe_vocab=DEFAULT_BYTELEVEL_BPE_VOCAB,
+                    bpe_merge=DEFAULT_BYTELEVEL_BPE_MERGE,
+                    bpe_add_prefix_space=False,
+                    model_file=model_file,
+                    save_after_valid=True,
+                    poly_attention_type='multihead',
+                    codes_attention_type='multihead',
+                )
+            )
 
 
 @testing_utils.skipUnlessVision
@@ -877,6 +1004,182 @@ class TestImagePolyencoder(unittest.TestCase):
         assert (
             valid['accuracy'] > 0.1
         ), f'ImagePolyencoderAgent val-set accuracy on a simple task was {valid["accuracy"].value():0.2f}.'
+
+
+class TestSwappableComponents(unittest.TestCase):
+    def _opt(self, **kwargs):
+        return Opt(
+            batchsize=4,
+            optimizer='adam',
+            n_layers=1,
+            n_heads=4,
+            ffn_size=16,
+            embedding_size=16,
+            skip_generation=True,
+            **kwargs,
+        )
+
+    def test_swap_encoder_attention(self):
+        CustomFFN = type('CustomFFN', (TransformerFFN,), {})
+        CustomFFN.forward = MagicMock()
+        wrapped_class = TransformerGeneratorModel.with_components(
+            encoder=TransformerEncoder.with_components(
+                layer=TransformerEncoderLayer.with_components(feedforward=CustomFFN)
+            )
+        )
+        opt = self._opt()
+        CustomFFN.forward.assert_not_called
+        model = wrapped_class(opt=opt, dictionary=DictionaryAgent(opt))
+        assert isinstance(model, TransformerGeneratorModel)  # type: ignore
+        try:
+            model(torch.zeros(1, 1).long(), ys=torch.zeros(1, 1).long())  # type: ignore
+        except TypeError:
+            pass
+        finally:
+            CustomFFN.forward.assert_called
+
+    def test_swap_is_not_persisted_in_class(self):
+        opt = self._opt()
+        dictionary = DictionaryAgent(opt)
+
+        CustomFFN = type('CustomFFN', (TransformerFFN,), {})
+        wrapped_class = TransformerGeneratorModel.with_components(
+            encoder=TransformerEncoder.with_components(
+                layer=TransformerEncoderLayer.with_components(feedforward=CustomFFN)
+            )
+        )
+        model = wrapped_class(opt=opt, dictionary=dictionary)
+        assert (
+            model.swappables.encoder.swappables.layer.swappables.feedforward
+            == CustomFFN
+        )  # type: ignore
+
+        another_model = TransformerGeneratorModel(opt, dictionary)
+        assert another_model.swappables != model.swappables
+        assert issubclass(
+            another_model.swappables.encoder, TransformerEncoder
+        )  # type: ignore
+
+        wrapped_class.swap_components(
+            encoder=TransformerEncoder.with_components(
+                layer=TransformerEncoderLayer.with_components(
+                    feedforward=TransformerFFN
+                )
+            )
+        )
+        one_more_model = wrapped_class(opt=opt, dictionary=dictionary)
+        assert (
+            one_more_model.swappables.encoder.swappables.layer.swappables.feedforward
+            == TransformerFFN
+        )  # type: ignore
+
+    def test_examples_variant(self):
+        opt = ParlaiParser(True, True).parse_kwargs(
+            model='parlai.agents.examples.transformer_variant:TransformerVariantAgent'
+        )
+        model = create_agent(opt)
+        # send the model a single training example to ensure it can forward/backward
+        model.observe({'text': '1 2 3 4', 'labels': ['1 2 3 4'], 'episode_done': True})
+        model.act()
+        # send the model a single validation example
+        model.observe(
+            {'text': '1 2 3 4', 'eval_labels': ['1 2 3 4'], 'episode_done': True}
+        )
+        model.act()
+
+    def test_examples_configurable(self):
+        opt = ParlaiParser(True, True).parse_kwargs(
+            model='parlai.agents.examples.transformer_variant:ConfigurableTransformerAgent',
+            decoder_ffn_variants='two',
+        )
+        model = create_agent(opt)
+        # send the model a single training example to ensure it can forward/backward
+        model.observe({'text': '1 2 3 4', 'labels': ['1 2 3 4'], 'episode_done': True})
+        model.act()
+        # send the model a single validation example
+        model.observe(
+            {'text': '1 2 3 4', 'eval_labels': ['1 2 3 4'], 'episode_done': True}
+        )
+        model.act()
+
+
+class TestDecoderOnly(unittest.TestCase):
+    """
+    Unit tests for DecoderOnlyAgent.
+    """
+
+    @pytest.mark.nofbcode
+    def test_resize_embeddings(self):
+        model = 'transformer/decoder'
+        with testing_utils.tempdir() as tmpdir:
+            model_file = os.path.join(tmpdir, 'model_file')
+            _, _ = testing_utils.train_model(
+                dict(
+                    model=model,
+                    task='integration_tests:short_fixed',
+                    n_layers=2,
+                    num_epochs=1,
+                    dict_tokenizer='bytelevelbpe',
+                    bpe_vocab=DEFAULT_BYTELEVEL_BPE_VOCAB,
+                    bpe_merge=DEFAULT_BYTELEVEL_BPE_MERGE,
+                    bpe_add_prefix_space=False,
+                    model_file=model_file,
+                    save_after_valid=True,
+                )
+            )
+
+            # now create agent with special tokens
+            parser = ParlaiParser()
+            parser.set_params(
+                model=model,
+                task='integration_tests:short_fixed',
+                n_layers=2,
+                dict_tokenizer='bytelevelbpe',
+                bpe_vocab=DEFAULT_BYTELEVEL_BPE_VOCAB,
+                bpe_merge=DEFAULT_BYTELEVEL_BPE_MERGE,
+                bpe_add_prefix_space=False,
+                model_file=model_file,
+                save_after_valid=True,
+                special_tok_lst='PARTY,PARROT',
+            )
+            opt = parser.parse_args([])
+            agent = create_agent(opt)
+            # assert that the embeddings were resized
+            assert agent.resized_embeddings
+            # assert model has special tokens
+            self.assertEqual(agent.special_toks, ['PARTY', 'PARROT'])
+
+    def _overfit_train(self, **args):
+        args = dict(
+            task='integration_tests:overfit',
+            model='transformer/decoder',
+            optimizer='sgd',
+            learningrate=1,
+            momentum=0.9,
+            batchsize=4,
+            n_layers=2,
+            n_heads=1,
+            ffn_size=32,
+            embedding_size=16,
+            inference='greedy',
+            beam_size=1,
+            skip_generation=True,
+            validation_metric='ppl',
+            validation_every_n_epochs=10,
+            num_epochs=100,
+        )
+        args.update(args)
+        return testing_utils.train_model(args)
+
+    @testing_utils.retry(ntries=3)
+    def test_train(self):
+        """
+        Test basic training.
+        """
+        valid, test = self._overfit_train(variant='prelayernorm', activation='gelu')
+
+        self.assertLessEqual(valid['ppl'], 1.30)
+        self.assertLessEqual(test['ppl'], 1.30)
 
 
 if __name__ == '__main__':

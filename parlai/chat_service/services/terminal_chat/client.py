@@ -11,6 +11,13 @@ import time
 import threading
 from parlai.core.params import ParlaiParser
 
+# the socket callback functions operate asynchronously.
+# upon exit of a chat, we do not want the user to view any additional messages from the server.
+# alas, it is necessary to send two messages ([DONE], and EXIT) in order to fully exist the world pool
+# to prevent receiving a message after sending [DONE], we track the user's state with
+# this global variable.
+RUNNING = True
+
 
 def _get_rand_id():
     """
@@ -35,6 +42,8 @@ def on_message(ws, message):
     :param ws: a WebSocketApp
     :param message: json with 'text' field to be printed
     """
+    if not RUNNING:
+        return
     incoming_message = json.loads(message)
     print("\033[0m\n")
     print("Bot: " + incoming_message['text'])
@@ -71,16 +80,22 @@ def _run(ws, id):
 
     :param ws: websocket.WebSocketApp
     """
+    global RUNNING
     while True:
         x = input("\033[44m Me: ")
         print("\033[0m", end="")
         data = {}
         data['id'] = id
         data['text'] = x
+        if x == "[DONE]":
+            RUNNING = False
         json_data = json.dumps(data)
         ws.send(json_data)
         time.sleep(1)
         if x == "[DONE]":
+            time.sleep(1)
+            data['text'] = 'EXIT'
+            ws.send(json.dumps(data))
             break
     ws.close()
 
@@ -106,15 +121,19 @@ def setup_args():
     parser_grp.add_argument(
         '--port', default=35496, type=int, help='Port to run the terminal chat server'
     )
+    parser_grp.add_argument(
+        '--host', default='localhost', type=str, help='Host to connect to.'
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     opt = setup_args()
     port = opt.get('port', 34596)
+    host = opt.get('host', 'localhost')
     print("Connecting to port: ", port)
     ws = websocket.WebSocketApp(
-        "ws://localhost:{}/websocket".format(port),
+        f"ws://{host}:{port}/websocket",
         on_message=on_message,
         on_error=on_error,
         on_close=on_close,

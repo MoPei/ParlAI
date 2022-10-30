@@ -30,6 +30,7 @@ class ELI5Teacher(FixedDialogTeacher):
     def add_cmdline_args(
         cls, parser: ParlaiParser, partial_opt: Optional[Opt] = None
     ) -> ParlaiParser:
+        super().add_cmdline_args(parser, partial_opt)
         group = parser.add_argument_group('ELI5 Knowledge arguments')
         group.add_argument(
             '--knowledge',
@@ -50,7 +51,7 @@ class ELI5Teacher(FixedDialogTeacher):
         if not PathManager.exists(fname):
             raise FileNotFoundError(
                 f"{fname} not found. Please follow the instructions found at "
-                "https://github.com/facebookresearch/ParlAI/tree/master/parlai/tasks/eli5/README.md"
+                "https://github.com/facebookresearch/ParlAI/tree/main/parlai/tasks/eli5/README.md"
                 " to construct the dataset."
             )
         opt['datafile'] = fname

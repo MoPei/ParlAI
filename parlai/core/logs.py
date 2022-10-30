@@ -14,16 +14,21 @@ extended to any other tool like visdom.
    tensorboard --logdir <PARLAI_DATA/tensorboard> --port 8888.
 """
 
-import os
-from typing import Optional
-from parlai.core.params import ParlaiParser
+import datetime
 import json
 import numbers
-import datetime
-from parlai.core.opt import Opt
-from parlai.core.metrics import Metric, dict_report
-from parlai.utils.io import PathManager
+import os
+import pathlib
+import re
+from typing import Optional
+
 import parlai.utils.logging as logging
+from parlai.core.metrics import Metric, dict_report, get_metric_display_data
+from parlai.core.opt import Opt
+from parlai.core.params import ParlaiParser
+from parlai.utils.io import PathManager
+
+_TB_SUMMARY_INVALID_TAG_CHARACTERS = re.compile(r'[^-/\w\.]')
 
 
 class TensorboardLogger(object):
@@ -87,12 +92,25 @@ class TensorboardLogger(object):
             The report to log
         """
         for k, v in report.items():
-            if isinstance(v, numbers.Number):
-                self.writer.add_scalar(f'{k}/{setting}', v, global_step=step)
-            elif isinstance(v, Metric):
-                self.writer.add_scalar(f'{k}/{setting}', v.value(), global_step=step)
-            else:
+            v = v.value() if isinstance(v, Metric) else v
+            if not isinstance(v, numbers.Number):
                 logging.error(f'k {k} v {v} is not a number')
+                continue
+            display = get_metric_display_data(metric=k)
+            # Remove invalid characters for TensborboardX Summary beforehand
+            # so that the logs aren't cluttered with warnings.
+            tag = _TB_SUMMARY_INVALID_TAG_CHARACTERS.sub('_', f'{k}/{setting}')
+            try:
+                self.writer.add_scalar(
+                    tag,
+                    v,
+                    global_step=step,
+                    display_name=f"{display.title}",
+                    summary_description=display.description,
+                )
+            except TypeError:
+                # internal tensorboard doesn't support custom display titles etc
+                self.writer.add_scalar(tag, v, global_step=step)
 
     def flush(self):
         self.writer.flush()
@@ -133,6 +151,21 @@ class WandbLogger(object):
             help='W&B project name. Defaults to timestamp. Usually the name of the sweep.',
             hidden=False,
         )
+        logger.add_argument(
+            '--wandb-entity',
+            type=str,
+            default=None,
+            help='W&B entity name.',
+            hidden=False,
+        )
+
+        logger.add_argument(
+            '--wandb-log-model',
+            type=bool,
+            default=False,
+            help='Enable logging of model artifacts to weight and biases',
+            hidden=False,
+        )
         return logger
 
     def __init__(self, opt: Opt, model=None):
@@ -154,13 +187,31 @@ class WandbLogger(object):
             project=project,
             dir=os.path.dirname(opt['model_file']),
             notes=f"{opt['model_file']}",
+            entity=opt.get('wandb_entity'),
             reinit=True,  # in case of preemption
+            resume=True,  # requeued runs should be treated as single run
         )
         # suppress wandb's output
         logging.getLogger("wandb").setLevel(logging.ERROR)
-        for key, value in opt.items():
-            if value is None or isinstance(value, (str, numbers.Number, tuple)):
-                setattr(self.run.config, key, value)
+
+        if not self.run.resumed:
+            task_arg = opt.get("task", None)
+            if task_arg:
+                if (
+                    len(task_arg.split(",")) == 1
+                ):  # It gets confusing to parse these args for multitask teachers, so don't.
+                    maybe_task_opts = task_arg.split(":")
+                    for task_opt in maybe_task_opts:
+                        if len(task_opt.split("=")) == 2:
+                            k, v = task_opt.split("=")
+                            setattr(self.run.config, k, v)
+
+            for key, value in opt.items():
+                if key not in self.run.config:  # set by task logic
+                    if value is None or isinstance(value, (str, numbers.Number, tuple)):
+                        setattr(self.run.config, key, value)
+
+        self.model_file = opt.get('model_file', None)
         if model is not None:
             self.run.watch(model)
 
@@ -193,6 +244,32 @@ class WandbLogger(object):
         }
         for key, value in report.items():
             self.run.summary[key] = value
+
+    def log_model(self, model_file=None):
+        if self.model_file is not None:
+            if not model_file:
+                model_file = self.model_file
+            model_file = pathlib.Path(model_file)
+            if model_file.exists():
+                self.run.log_artifact(
+                    str(model_file),
+                    name=f"{self.run.name}-{model_file.name}",
+                    type="model",
+                )
+            vocab_file = model_file.with_suffix('.dict')
+            if vocab_file.exists():
+                self.run.log_artifact(
+                    str(vocab_file),
+                    name=f"{self.run.name}-{vocab_file.name}",
+                    type="vocab",
+                )
+            stats_file = model_file.with_suffix('.trainstats')
+            if stats_file.exists():
+                self.run.log_artifact(
+                    str(stats_file),
+                    name=f"{self.run.name}-{stats_file.name}",
+                    type="stats",
+                )
 
     def finish(self):
         self.run.finish()
