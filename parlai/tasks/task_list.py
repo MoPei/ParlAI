@@ -490,10 +490,10 @@ task_list = [
             "An open domain question answering dataset. "
             "Each example contains real questions that people searched "
             "for in Google and the content of the a Wikipedia article that "
-            "was amongst the top 5 search resutls for that query, "
+            "was amongst the top 5 search results for that query, "
             "and its annotations. The annotations have the options of a long "
             "answer that is seleced from span of major content entities in "
-            "the Wikipedia article (e.g., paragraphs, tables), a short answer"
+            "the Wikipedia article (e.g., paragraphs, tables), a short answer "
             "that is selected from one or more short span of words in the "
             "article, or 'yes/no'. The existence of any of these answer "
             "formats depends on whether the main question can be answered, "
@@ -540,6 +540,18 @@ task_list = [
             "based on user profiles."
         ),
         "links": {"arXiv": "https://arxiv.org/abs/1706.07503"},
+    },
+    {
+        "id": "prosocial_dialog",
+        "display_name": "Prosocial Dialog",
+        "task": "prosocial_dialog",
+        "tags": [],
+        "description": (
+            "Prosocial Dialog dataset of 58K dialogues between a speaker showing "
+            "potentially unsafe behavior and a speaker giving constructive feedback "
+            "for more socially acceptable behavior."
+        ),
+        "links": {"arXiv": "https://arxiv.org/abs/2205.12688"},
     },
     {
         "id": "QACNN",
@@ -671,7 +683,7 @@ task_list = [
             "Dialogs between an Ubuntu user and an expert trying to fix issue, "
             "we use the V2 version, which cleaned the data to some extent. "
         ),
-        "links": {"arXiv": "https://arxiv.org/abs/1506.08909."},
+        "links": {"arXiv": "https://arxiv.org/abs/1506.08909"},
     },
     {
         "id": "WebQuestions",
